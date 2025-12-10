@@ -17,6 +17,8 @@ import {
   HardDrive,
   AudioWaveform as Waveform,
   Loader2,
+  CheckCircle2,
+  Cloud,
 } from "lucide-react"
 import type { ProjectSettings } from "@/app/create/page"
 
@@ -32,7 +34,9 @@ export function AudioUploader({ settings, updateSettings, onNext }: AudioUploade
   const [isLoadingUrl, setIsLoadingUrl] = useState(false)
   const [waveformData, setWaveformData] = useState<number[]>([])
   const [uploadProgress, setUploadProgress] = useState(0)
+  const [uploadStatus, setUploadStatus] = useState<"idle" | "uploading" | "processing" | "complete" | "error">("idle")
   const [isAnalyzing, setIsAnalyzing] = useState(false)
+  const [cloudUrl, setCloudUrl] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
 
@@ -103,38 +107,88 @@ export function AudioUploader({ settings, updateSettings, onNext }: AudioUploade
     })
   }, [waveformData])
 
+  const uploadToCloud = async (file: File): Promise<string | null> => {
+    try {
+      const formData = new FormData()
+      formData.append("file", file)
+
+      const response = await fetch("/api/upload", {
+        method: "POST",
+        body: formData,
+      })
+
+      if (!response.ok) {
+        throw new Error("Upload failed")
+      }
+
+      const data = await response.json()
+      return data.url
+    } catch (error) {
+      console.error("Cloud upload error:", error)
+      return null
+    }
+  }
+
   const handleFile = useCallback(
     async (file: File) => {
-      if (file.type.startsWith("audio/")) {
-        // Simulate upload progress
+      if (file.type.startsWith("audio/") || file.name.match(/\.(mp3|wav|flac|ogg|m4a|aac|wma)$/i)) {
+        setUploadStatus("uploading")
         setUploadProgress(0)
-        const progressInterval = setInterval(() => {
-          setUploadProgress((prev) => {
-            if (prev >= 100) {
-              clearInterval(progressInterval)
-              return 100
-            }
-            return prev + Math.random() * 30
-          })
-        }, 100)
 
-        const url = URL.createObjectURL(file)
-        const audio = new Audio(url)
+        // Create local URL for preview
+        const localUrl = URL.createObjectURL(file)
+        const audio = new Audio(localUrl)
+
+        // Start upload to cloud in parallel
+        const uploadPromise = uploadToCloud(file)
+
+        // Simulate initial progress
+        const progressInterval = setInterval(() => {
+          setUploadProgress((prev) => Math.min(prev + Math.random() * 15, 70))
+        }, 200)
 
         audio.addEventListener("loadedmetadata", async () => {
+          // Wait for cloud upload to complete
+          const cloudUploadUrl = await uploadPromise
           clearInterval(progressInterval)
-          setUploadProgress(100)
 
-          updateSettings({
-            audioFile: file,
-            audioUrl: url,
-            audioDuration: audio.duration,
-            trimEnd: audio.duration,
-            title: file.name.replace(/\.[^/.]+$/, ""),
-          })
+          if (cloudUploadUrl) {
+            setCloudUrl(cloudUploadUrl)
+            setUploadProgress(90)
+            setUploadStatus("processing")
 
-          // Generate waveform
-          await generateWaveform(url)
+            updateSettings({
+              audioFile: file,
+              audioUrl: cloudUploadUrl, // Use cloud URL for actual processing
+              audioDuration: audio.duration,
+              trimEnd: audio.duration,
+              title: file.name.replace(/\.[^/.]+$/, ""),
+            })
+
+            // Generate waveform using local URL (faster)
+            await generateWaveform(localUrl)
+
+            setUploadProgress(100)
+            setUploadStatus("complete")
+          } else {
+            // Fallback to local URL if cloud upload fails
+            updateSettings({
+              audioFile: file,
+              audioUrl: localUrl,
+              audioDuration: audio.duration,
+              trimEnd: audio.duration,
+              title: file.name.replace(/\.[^/.]+$/, ""),
+            })
+
+            await generateWaveform(localUrl)
+            setUploadProgress(100)
+            setUploadStatus("complete")
+          }
+        })
+
+        audio.addEventListener("error", () => {
+          clearInterval(progressInterval)
+          setUploadStatus("error")
         })
       }
     },
@@ -165,7 +219,6 @@ export function AudioUploader({ settings, updateSettings, onNext }: AudioUploade
 
     setIsLoadingUrl(true)
     try {
-      // Try to fetch the audio
       const response = await fetch(urlInput)
       const blob = await response.blob()
       const file = new File([blob], "audio-from-url.mp3", { type: blob.type || "audio/mpeg" })
@@ -178,8 +231,21 @@ export function AudioUploader({ settings, updateSettings, onNext }: AudioUploade
     setIsLoadingUrl(false)
   }
 
-  const clearAudio = () => {
-    if (settings.audioUrl) {
+  const clearAudio = async () => {
+    // Delete from cloud if uploaded
+    if (cloudUrl) {
+      try {
+        await fetch("/api/delete", {
+          method: "DELETE",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ url: cloudUrl }),
+        })
+      } catch (error) {
+        console.error("Error deleting cloud file:", error)
+      }
+    }
+
+    if (settings.audioUrl && settings.audioUrl.startsWith("blob:")) {
       URL.revokeObjectURL(settings.audioUrl)
     }
     updateSettings({
@@ -192,6 +258,8 @@ export function AudioUploader({ settings, updateSettings, onNext }: AudioUploade
     })
     setWaveformData([])
     setUploadProgress(0)
+    setUploadStatus("idle")
+    setCloudUrl(null)
   }
 
   const formatDuration = (seconds: number) => {
@@ -226,7 +294,7 @@ export function AudioUploader({ settings, updateSettings, onNext }: AudioUploade
             onClick={() => fileInputRef.current?.click()}
           >
             <CardContent className="flex flex-col items-center justify-center py-16">
-              <div className="mb-4 h-20 w-20 rounded-full bg-gradient-to-br from-primary/20 to-accent/20 flex items-center justify-center">
+              <div className="mb-4 h-20 w-20 rounded-full bg-gradient-to-br from-primary/20 to-pink-500/20 flex items-center justify-center">
                 <Upload className={`h-10 w-10 text-primary transition-transform ${isDragging ? "scale-110" : ""}`} />
               </div>
               <h3 className="text-lg font-semibold mb-1">Drop your audio file here</h3>
@@ -240,7 +308,7 @@ export function AudioUploader({ settings, updateSettings, onNext }: AudioUploade
           <input
             ref={fileInputRef}
             type="file"
-            accept="audio/*"
+            accept="audio/*,.mp3,.wav,.flac,.ogg,.m4a,.aac,.wma"
             className="hidden"
             onChange={(e) => {
               const file = e.target.files?.[0]
@@ -290,10 +358,10 @@ export function AudioUploader({ settings, updateSettings, onNext }: AudioUploade
       ) : (
         /* Audio loaded state */
         <Card className="border-primary/50 overflow-hidden">
-          {uploadProgress < 100 && <Progress value={uploadProgress} className="h-1 rounded-none" />}
+          {uploadStatus !== "complete" && <Progress value={uploadProgress} className="h-1 rounded-none" />}
           <CardContent className="p-6">
             <div className="flex items-center gap-4 mb-4">
-              <div className="h-16 w-16 rounded-lg bg-gradient-to-br from-primary/20 to-accent/20 flex items-center justify-center flex-shrink-0">
+              <div className="h-16 w-16 rounded-lg bg-gradient-to-br from-primary/20 to-pink-500/20 flex items-center justify-center flex-shrink-0">
                 <Music className="h-8 w-8 text-primary" />
               </div>
               <div className="flex-1 min-w-0">
@@ -307,12 +375,53 @@ export function AudioUploader({ settings, updateSettings, onNext }: AudioUploade
                     <HardDrive className="h-3.5 w-3.5" />
                     {formatFileSize(settings.audioFile.size)}
                   </span>
+                  {cloudUrl && (
+                    <span className="flex items-center gap-1 text-green-500">
+                      <Cloud className="h-3.5 w-3.5" />
+                      Uploaded
+                    </span>
+                  )}
                 </div>
               </div>
               <Button variant="ghost" size="icon" onClick={clearAudio}>
                 <X className="h-4 w-4" />
               </Button>
             </div>
+
+            {/* Upload status indicator */}
+            {uploadStatus !== "complete" && uploadStatus !== "idle" && (
+              <div className="mb-4 p-3 rounded-lg bg-secondary/50">
+                <div className="flex items-center gap-2 text-sm">
+                  {uploadStatus === "uploading" && (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin text-primary" />
+                      <span>Uploading to cloud...</span>
+                    </>
+                  )}
+                  {uploadStatus === "processing" && (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin text-primary" />
+                      <span>Processing audio...</span>
+                    </>
+                  )}
+                  {uploadStatus === "error" && (
+                    <>
+                      <X className="h-4 w-4 text-red-500" />
+                      <span className="text-red-500">Upload failed. Using local file.</span>
+                    </>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {uploadStatus === "complete" && cloudUrl && (
+              <div className="mb-4 p-3 rounded-lg bg-green-500/10 border border-green-500/20">
+                <div className="flex items-center gap-2 text-sm text-green-500">
+                  <CheckCircle2 className="h-4 w-4" />
+                  <span>Audio uploaded to cloud and ready for processing</span>
+                </div>
+              </div>
+            )}
 
             {/* Waveform visualization */}
             <div className="relative h-24 bg-secondary/50 rounded-lg overflow-hidden mb-4">
@@ -335,13 +444,23 @@ export function AudioUploader({ settings, updateSettings, onNext }: AudioUploade
               <audio
                 src={settings.audioUrl || undefined}
                 controls
+                crossOrigin="anonymous"
                 className="w-full h-10 [&::-webkit-media-controls-panel]:bg-secondary [&::-webkit-media-controls-panel]:rounded-lg"
               />
             </div>
 
-            <Button className="w-full gap-2" size="lg" onClick={onNext}>
-              Continue to Customize
-              <ArrowRight className="h-4 w-4" />
+            <Button className="w-full gap-2" size="lg" onClick={onNext} disabled={uploadStatus === "uploading"}>
+              {uploadStatus === "uploading" ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Uploading...
+                </>
+              ) : (
+                <>
+                  Continue to Customize
+                  <ArrowRight className="h-4 w-4" />
+                </>
+              )}
             </Button>
           </CardContent>
         </Card>

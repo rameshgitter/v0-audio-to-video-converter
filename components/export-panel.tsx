@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useRef, useCallback } from "react"
+import { useState, useRef, useEffect, useCallback } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -8,7 +8,8 @@ import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { Progress } from "@/components/ui/progress"
 import { Badge } from "@/components/ui/badge"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Alert, AlertDescription } from "@/components/ui/alert"
 import {
   Download,
   Youtube,
@@ -17,15 +18,18 @@ import {
   Loader2,
   AlertCircle,
   ExternalLink,
-  Share2,
-  Copy,
+  Video,
+  Settings,
   Clock,
   HardDrive,
   Sparkles,
-  Video,
-  Settings,
+  Info,
+  Upload,
+  RefreshCw,
 } from "lucide-react"
 import type { ProjectSettings } from "@/app/create/page"
+import { createRenderContext, renderFrame } from "@/lib/frame-renderer"
+import { isFFmpegSupported, loadFFmpeg } from "@/lib/ffmpeg-worker"
 
 interface ExportPanelProps {
   settings: ProjectSettings
@@ -33,26 +37,69 @@ interface ExportPanelProps {
   onBack: () => void
 }
 
-type ExportStatus = "idle" | "preparing" | "rendering" | "encoding" | "complete" | "error"
-type YouTubeStatus = "disconnected" | "connecting" | "connected" | "uploading" | "processing" | "complete"
+type ExportStatus = "idle" | "preparing" | "rendering" | "encoding" | "uploading" | "complete" | "error"
+type ExportMethod = "browser" | "ffmpeg"
+
+interface YouTubeUser {
+  email: string
+  name: string
+  picture: string
+  channelId: string
+  channelTitle: string
+}
 
 export function ExportPanel({ settings, onBack }: ExportPanelProps) {
   const [exportStatus, setExportStatus] = useState<ExportStatus>("idle")
+  const [exportMethod, setExportMethod] = useState<ExportMethod>("browser")
   const [progress, setProgress] = useState(0)
   const [currentFrame, setCurrentFrame] = useState(0)
   const [totalFrames, setTotalFrames] = useState(0)
-  const [youtubeStatus, setYoutubeStatus] = useState<YouTubeStatus>("disconnected")
+  const [statusMessage, setStatusMessage] = useState("")
+  const [videoBlob, setVideoBlob] = useState<Blob | null>(null)
+  const [videoUrl, setVideoUrl] = useState<string | null>(null)
+  const [cloudVideoUrl, setCloudVideoUrl] = useState<string | null>(null)
+  const [estimatedSize, setEstimatedSize] = useState<string>("")
+  const [renderTime, setRenderTime] = useState<string>("")
+  const [error, setError] = useState<string | null>(null)
+
+  // YouTube state
+  const [youtubeConnected, setYoutubeConnected] = useState(false)
+  const [youtubeUser, setYoutubeUser] = useState<YouTubeUser | null>(null)
+  const [youtubeLoading, setYoutubeLoading] = useState(true)
   const [youtubeTitle, setYoutubeTitle] = useState(settings.title)
   const [youtubeDescription, setYoutubeDescription] = useState("")
   const [youtubeTags, setYoutubeTags] = useState("")
-  const [youtubePrivacy, setYoutubePrivacy] = useState<"public" | "unlisted" | "private">("public")
-  const [videoBlob, setVideoBlob] = useState<Blob | null>(null)
-  const [estimatedSize, setEstimatedSize] = useState<string>("")
-  const [renderTime, setRenderTime] = useState<string>("")
-  const canvasRef = useRef<HTMLCanvasElement>(null)
+  const [youtubePrivacy, setYoutubePrivacy] = useState<"public" | "unlisted" | "private">("private")
+  const [youtubeUploading, setYoutubeUploading] = useState(false)
+  const [youtubeUploadProgress, setYoutubeUploadProgress] = useState(0)
+  const [youtubeVideoUrl, setYoutubeVideoUrl] = useState<string | null>(null)
+
+  const [ffmpegSupported, setFfmpegSupported] = useState(false)
+  const [ffmpegLoading, setFfmpegLoading] = useState(false)
+  const abortControllerRef = useRef<AbortController | null>(null)
+
+  // Check FFmpeg support and YouTube status on mount
+  useEffect(() => {
+    setFfmpegSupported(isFFmpegSupported())
+    checkYouTubeStatus()
+  }, [])
+
+  // Check YouTube connection status
+  const checkYouTubeStatus = async () => {
+    setYoutubeLoading(true)
+    try {
+      const response = await fetch("/api/youtube/status")
+      const data = await response.json()
+      setYoutubeConnected(data.connected)
+      setYoutubeUser(data.user)
+    } catch (error) {
+      console.error("Error checking YouTube status:", error)
+    }
+    setYoutubeLoading(false)
+  }
 
   // Calculate resolution based on quality
-  const getResolution = () => {
+  const getResolution = useCallback(() => {
     const aspectRatio = settings.aspectRatio
     const [w, h] = aspectRatio.split(":").map(Number)
     const ratio = w / h
@@ -77,7 +124,7 @@ export function ExportPanel({ settings, onBack }: ExportPanelProps) {
       default:
         return { width: 1920, height: 1080 }
     }
-  }
+  }, [settings.aspectRatio, settings.quality])
 
   const resolution = getResolution()
 
@@ -86,179 +133,170 @@ export function ExportPanel({ settings, onBack }: ExportPanelProps) {
     const duration = (settings.trimEnd || settings.audioDuration) - settings.trimStart
     const pixels = resolution.width * resolution.height
     const fps = settings.fps
-    const bitratePerPixel = 0.1 // bits per pixel
+    const bitratePerPixel = 0.1
     const bitrate = pixels * fps * bitratePerPixel
     const sizeBytes = (bitrate * duration) / 8
     const sizeMB = sizeBytes / (1024 * 1024)
 
-    if (sizeMB < 1) {
-      return `~${Math.round(sizeMB * 1024)} KB`
-    } else if (sizeMB < 1024) {
-      return `~${sizeMB.toFixed(1)} MB`
-    } else {
-      return `~${(sizeMB / 1024).toFixed(2)} GB`
-    }
+    if (sizeMB < 1) return `~${Math.round(sizeMB * 1024)} KB`
+    if (sizeMB < 1024) return `~${sizeMB.toFixed(1)} MB`
+    return `~${(sizeMB / 1024).toFixed(2)} GB`
   }, [settings, resolution])
 
-  // Real video export using MediaRecorder API
+  // Load FFmpeg
+  const handleLoadFFmpeg = async () => {
+    setFfmpegLoading(true)
+    try {
+      await loadFFmpeg((progress) => {
+        setStatusMessage(`Loading FFmpeg: ${progress}%`)
+      })
+      setExportMethod("ffmpeg")
+    } catch (error) {
+      console.error("Failed to load FFmpeg:", error)
+      setError("Failed to load FFmpeg. Using browser export instead.")
+    }
+    setFfmpegLoading(false)
+  }
+
+  // Real video export using canvas capture
   const exportVideo = async () => {
     setExportStatus("preparing")
     setProgress(0)
+    setError(null)
     const startTime = Date.now()
+    abortControllerRef.current = new AbortController()
 
     try {
-      // Create offscreen canvas for rendering
-      const canvas = document.createElement("canvas")
-      canvas.width = resolution.width
-      canvas.height = resolution.height
-      const ctx = canvas.getContext("2d")!
-
-      // Setup MediaRecorder
-      const stream = canvas.captureStream(settings.fps)
-
-      // Add audio track if we have audio
-      if (settings.audioUrl) {
-        const audioElement = new Audio(settings.audioUrl)
-        audioElement.crossOrigin = "anonymous"
-        await new Promise((resolve) => {
-          audioElement.addEventListener("canplaythrough", resolve, { once: true })
-          audioElement.load()
-        })
-
-        const audioContext = new AudioContext()
-        const source = audioContext.createMediaElementSource(audioElement)
-        const destination = audioContext.createMediaStreamDestination()
-        source.connect(destination)
-        source.connect(audioContext.destination)
-
-        destination.stream.getAudioTracks().forEach((track) => {
-          stream.addTrack(track)
-        })
-
-        audioElement.currentTime = settings.trimStart
-        audioElement.play()
-      }
-
-      const mediaRecorder = new MediaRecorder(stream, {
-        mimeType: "video/webm;codecs=vp9",
-        videoBitsPerSecond: resolution.width * resolution.height * settings.fps * 0.1,
-      })
-
-      const chunks: Blob[] = []
-      mediaRecorder.ondataavailable = (e) => {
-        if (e.data.size > 0) {
-          chunks.push(e.data)
-        }
-      }
-
       const duration = (settings.trimEnd || settings.audioDuration) - settings.trimStart
       const totalFramesCount = Math.ceil(duration * settings.fps)
       setTotalFrames(totalFramesCount)
 
+      // Setup audio for analysis
+      const audioElement = new Audio(settings.audioUrl!)
+      audioElement.crossOrigin = "anonymous"
+      await new Promise<void>((resolve, reject) => {
+        audioElement.addEventListener("canplaythrough", () => resolve(), { once: true })
+        audioElement.addEventListener("error", reject, { once: true })
+        audioElement.load()
+      })
+
+      const audioContext = new AudioContext()
+      const source = audioContext.createMediaElementSource(audioElement)
+      const analyser = audioContext.createAnalyser()
+      analyser.fftSize = 512
+      analyser.smoothingTimeConstant = settings.visualizerSmoothing
+      source.connect(analyser)
+      source.connect(audioContext.destination)
+
+      const frequencyData = new Uint8Array(analyser.frequencyBinCount)
+
+      // Create render context
+      const renderContext = createRenderContext(resolution.width, resolution.height, settings)
+
+      // Create canvas stream for recording
+      const stream = renderContext.canvas.captureStream(settings.fps)
+
+      // Add audio track
+      const audioDestination = audioContext.createMediaStreamDestination()
+      source.connect(audioDestination)
+      audioDestination.stream.getAudioTracks().forEach((track) => {
+        stream.addTrack(track)
+      })
+
+      // Setup MediaRecorder
+      const mimeType = MediaRecorder.isTypeSupported("video/webm;codecs=vp9,opus")
+        ? "video/webm;codecs=vp9,opus"
+        : "video/webm"
+
+      const mediaRecorder = new MediaRecorder(stream, {
+        mimeType,
+        videoBitsPerSecond: resolution.width * resolution.height * settings.fps * 0.15,
+      })
+
+      const chunks: Blob[] = []
+      mediaRecorder.ondataavailable = (e) => {
+        if (e.data.size > 0) chunks.push(e.data)
+      }
+
       setExportStatus("rendering")
+      setStatusMessage("Rendering video frames...")
 
       mediaRecorder.start(100)
+      audioElement.currentTime = settings.trimStart
+      audioElement.play()
 
-      // Render frames
+      // Render loop
       let frame = 0
       const frameInterval = 1000 / settings.fps
 
-      const renderFrame = () => {
-        if (frame >= totalFramesCount) {
+      const renderLoop = () => {
+        if (abortControllerRef.current?.signal.aborted) {
           mediaRecorder.stop()
+          audioElement.pause()
           return
         }
 
+        if (frame >= totalFramesCount) {
+          mediaRecorder.stop()
+          audioElement.pause()
+          return
+        }
+
+        // Get frequency data
+        analyser.getByteFrequencyData(frequencyData)
+
+        // Calculate current time
         const time = settings.trimStart + frame / settings.fps
 
-        // Clear canvas
-        ctx.fillStyle = "#000"
-        ctx.fillRect(0, 0, resolution.width, resolution.height)
-
-        // Draw background
-        if (settings.backgroundType === "gradient") {
-          const gradient = ctx.createLinearGradient(0, 0, resolution.width, resolution.height)
-          gradient.addColorStop(0, settings.backgroundGradient[0])
-          gradient.addColorStop(1, settings.backgroundGradient[1])
-          ctx.fillStyle = gradient
-          ctx.fillRect(0, 0, resolution.width, resolution.height)
-        } else {
-          ctx.fillStyle = settings.backgroundColor
-          ctx.fillRect(0, 0, resolution.width, resolution.height)
-        }
-
-        // Simulate visualizer (in real implementation, use actual audio data)
-        const centerX = resolution.width / 2
-        const centerY = resolution.height / 2
-        const barCount = 64
-
-        for (let i = 0; i < barCount; i++) {
-          const amplitude = Math.sin(time * 10 + i * 0.2) * 0.5 + 0.5
-          const barHeight = amplitude * resolution.height * 0.3 * settings.visualizerSensitivity
-          const barWidth = (resolution.width / barCount) * 0.8
-          const x = i * (resolution.width / barCount)
-          const y = centerY - barHeight / 2
-
-          const gradient = ctx.createLinearGradient(x, y, x, y + barHeight)
-          gradient.addColorStop(0, settings.visualizerColor)
-          gradient.addColorStop(1, settings.visualizerSecondaryColor)
-          ctx.fillStyle = gradient
-          ctx.fillRect(x, y, barWidth, barHeight)
-        }
-
-        // Draw text overlays
-        settings.textOverlays.forEach((overlay) => {
-          if (time >= overlay.startTime && time <= overlay.endTime) {
-            ctx.font = `${overlay.fontSize * (resolution.width / 640)}px ${overlay.fontFamily}`
-            ctx.fillStyle = overlay.color
-            ctx.textAlign = "center"
-            ctx.textBaseline = "middle"
-            const x = (overlay.position.x / 100) * resolution.width
-            const y = (overlay.position.y / 100) * resolution.height
-            ctx.fillText(overlay.text, x, y)
-          }
-        })
-
-        // Draw watermark
-        if (settings.watermark.enabled) {
-          ctx.font = `${16 * (resolution.width / 640)}px Inter`
-          ctx.fillStyle = `rgba(255, 255, 255, ${settings.watermark.opacity / 100})`
-          ctx.textAlign = "right"
-          ctx.textBaseline = "bottom"
-          ctx.fillText(settings.watermark.text, resolution.width - 20, resolution.height - 20)
-        }
-
-        // Draw progress bar
-        if (settings.progress.enabled) {
-          const progressValue = (time - settings.trimStart) / duration
-          const barHeight = 6 * (resolution.width / 640)
-          const y = settings.progress.position === "top" ? 20 : resolution.height - 20 - barHeight
-
-          ctx.fillStyle = `${settings.progress.color}40`
-          ctx.fillRect(20, y, resolution.width - 40, barHeight)
-          ctx.fillStyle = settings.progress.color
-          ctx.fillRect(20, y, (resolution.width - 40) * progressValue, barHeight)
-        }
+        // Render frame
+        renderFrame(renderContext, time, frequencyData)
 
         setCurrentFrame(frame)
         setProgress((frame / totalFramesCount) * 80)
         frame++
 
-        setTimeout(renderFrame, frameInterval / 4) // Render faster than realtime
+        setTimeout(renderLoop, frameInterval)
       }
 
-      renderFrame()
+      renderLoop()
 
+      // Wait for recording to complete
       await new Promise<void>((resolve) => {
         mediaRecorder.onstop = () => resolve()
       })
 
+      await audioContext.close()
+
       setExportStatus("encoding")
-      setProgress(90)
+      setStatusMessage("Encoding video...")
+      setProgress(85)
 
       // Create final blob
-      const blob = new Blob(chunks, { type: "video/webm" })
+      const blob = new Blob(chunks, { type: mimeType })
       setVideoBlob(blob)
+
+      // Create preview URL
+      const url = URL.createObjectURL(blob)
+      setVideoUrl(url)
+
+      // Upload to cloud storage
+      setExportStatus("uploading")
+      setStatusMessage("Uploading to cloud...")
+      setProgress(90)
+
+      const formData = new FormData()
+      formData.append("video", blob, `${settings.title}.webm`)
+      formData.append("title", settings.title)
+
+      const uploadResponse = await fetch("/api/upload-video", {
+        method: "POST",
+        body: formData,
+      })
+
+      if (uploadResponse.ok) {
+        const uploadData = await uploadResponse.json()
+        setCloudVideoUrl(uploadData.url)
+      }
 
       const elapsed = (Date.now() - startTime) / 1000
       setRenderTime(
@@ -270,12 +308,22 @@ export function ExportPanel({ settings, onBack }: ExportPanelProps) {
 
       setProgress(100)
       setExportStatus("complete")
+      setStatusMessage("Export complete!")
     } catch (error) {
       console.error("Export error:", error)
+      setError(error instanceof Error ? error.message : "Export failed")
       setExportStatus("error")
     }
   }
 
+  // Cancel export
+  const cancelExport = () => {
+    abortControllerRef.current?.abort()
+    setExportStatus("idle")
+    setProgress(0)
+  }
+
+  // Download video
   const downloadVideo = () => {
     if (!videoBlob) return
 
@@ -289,51 +337,77 @@ export function ExportPanel({ settings, onBack }: ExportPanelProps) {
     URL.revokeObjectURL(url)
   }
 
-  const connectYouTube = () => {
-    setYoutubeStatus("connecting")
-    // Simulate OAuth flow
-    setTimeout(() => {
-      setYoutubeStatus("connected")
-    }, 1500)
+  // Connect YouTube
+  const connectYouTube = async () => {
+    try {
+      const response = await fetch("/api/auth/youtube")
+      const data = await response.json()
+
+      if (data.error) {
+        setError(data.error)
+        return
+      }
+
+      // Open OAuth window
+      window.location.href = data.authUrl
+    } catch (error) {
+      console.error("YouTube connect error:", error)
+      setError("Failed to connect to YouTube")
+    }
   }
 
-  const uploadToYouTube = () => {
+  // Disconnect YouTube
+  const disconnectYouTube = async () => {
+    try {
+      await fetch("/api/youtube/disconnect", { method: "POST" })
+      setYoutubeConnected(false)
+      setYoutubeUser(null)
+    } catch (error) {
+      console.error("YouTube disconnect error:", error)
+    }
+  }
+
+  // Upload to YouTube
+  const uploadToYouTube = async () => {
     if (!videoBlob) return
 
-    setYoutubeStatus("uploading")
-    let uploadProgress = 0
+    setYoutubeUploading(true)
+    setYoutubeUploadProgress(0)
 
-    const interval = setInterval(() => {
-      uploadProgress += Math.random() * 15
-      if (uploadProgress >= 100) {
-        clearInterval(interval)
-        setYoutubeStatus("processing")
-        setTimeout(() => {
-          setYoutubeStatus("complete")
-        }, 2000)
+    try {
+      const formData = new FormData()
+      formData.append("video", videoBlob, `${youtubeTitle}.webm`)
+      formData.append("title", youtubeTitle)
+      formData.append("description", youtubeDescription)
+      formData.append("tags", youtubeTags)
+      formData.append("privacy", youtubePrivacy)
+
+      // Simulate progress (actual progress would need XMLHttpRequest)
+      const progressInterval = setInterval(() => {
+        setYoutubeUploadProgress((prev) => Math.min(prev + Math.random() * 10, 90))
+      }, 500)
+
+      const response = await fetch("/api/youtube/upload", {
+        method: "POST",
+        body: formData,
+      })
+
+      clearInterval(progressInterval)
+
+      if (!response.ok) {
+        const error = await response.json()
+        throw new Error(error.error || "Upload failed")
       }
-    }, 500)
-  }
 
-  const copyShareLink = () => {
-    navigator.clipboard.writeText("https://audiovid.pro/share/abc123")
-  }
-
-  const getStatusText = () => {
-    switch (exportStatus) {
-      case "preparing":
-        return "Preparing export..."
-      case "rendering":
-        return `Rendering frame ${currentFrame} of ${totalFrames}...`
-      case "encoding":
-        return "Encoding video..."
-      case "complete":
-        return "Export complete!"
-      case "error":
-        return "Export failed"
-      default:
-        return "Ready to export"
+      const data = await response.json()
+      setYoutubeUploadProgress(100)
+      setYoutubeVideoUrl(data.videoUrl)
+    } catch (error) {
+      console.error("YouTube upload error:", error)
+      setError(error instanceof Error ? error.message : "YouTube upload failed")
     }
+
+    setYoutubeUploading(false)
   }
 
   const duration = (settings.trimEnd || settings.audioDuration) - settings.trimStart
@@ -380,7 +454,6 @@ export function ExportPanel({ settings, onBack }: ExportPanelProps) {
             </div>
           </div>
 
-          {/* Features included */}
           <div className="mt-4 pt-4 border-t">
             <p className="text-sm text-muted-foreground mb-2">Included features:</p>
             <div className="flex flex-wrap gap-2">
@@ -392,12 +465,17 @@ export function ExportPanel({ settings, onBack }: ExportPanelProps) {
               {settings.showLogo && <Badge variant="secondary">Logo</Badge>}
               {settings.progress.enabled && <Badge variant="secondary">Progress bar</Badge>}
               {settings.watermark.enabled && <Badge variant="secondary">Watermark</Badge>}
-              {settings.fadeInDuration > 0 && <Badge variant="secondary">Fade in</Badge>}
-              {settings.fadeOutDuration > 0 && <Badge variant="secondary">Fade out</Badge>}
             </div>
           </div>
         </CardContent>
       </Card>
+
+      {error && (
+        <Alert variant="destructive" className="mb-6">
+          <AlertCircle className="h-4 w-4" />
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
+      )}
 
       <div className="grid md:grid-cols-2 gap-6">
         {/* Download Section */}
@@ -405,13 +483,41 @@ export function ExportPanel({ settings, onBack }: ExportPanelProps) {
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <Download className="h-5 w-5" />
-              Download Video
+              Generate Video
             </CardTitle>
-            <CardDescription>Export your video as a WebM file</CardDescription>
+            <CardDescription>Export your video for download or YouTube upload</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             {exportStatus === "idle" && (
               <>
+                {/* Export method selection */}
+                {ffmpegSupported && (
+                  <div className="p-3 rounded-lg bg-secondary/50 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm font-medium">Export Method</span>
+                      <Badge variant={exportMethod === "ffmpeg" ? "default" : "secondary"}>
+                        {exportMethod === "ffmpeg" ? "FFmpeg (MP4)" : "Browser (WebM)"}
+                      </Badge>
+                    </div>
+                    {exportMethod !== "ffmpeg" && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="w-full gap-2 bg-transparent"
+                        onClick={handleLoadFFmpeg}
+                        disabled={ffmpegLoading}
+                      >
+                        {ffmpegLoading ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <Sparkles className="h-4 w-4" />
+                        )}
+                        Load FFmpeg for MP4 Export
+                      </Button>
+                    )}
+                  </div>
+                )}
+
                 <div className="space-y-3 text-sm">
                   <div className="flex items-center justify-between">
                     <span className="text-muted-foreground flex items-center gap-2">
@@ -425,7 +531,7 @@ export function ExportPanel({ settings, onBack }: ExportPanelProps) {
                       <Clock className="h-4 w-4" />
                       Est. Render Time
                     </span>
-                    <span className="font-medium">~{Math.ceil(duration / 10)} min</span>
+                    <span className="font-medium">~{Math.ceil(duration / 5)} min</span>
                   </div>
                   <div className="flex items-center justify-between">
                     <span className="text-muted-foreground flex items-center gap-2">
@@ -436,6 +542,13 @@ export function ExportPanel({ settings, onBack }: ExportPanelProps) {
                   </div>
                 </div>
 
+                <Alert>
+                  <Info className="h-4 w-4" />
+                  <AlertDescription>
+                    Video will be rendered in your browser and uploaded to cloud storage.
+                  </AlertDescription>
+                </Alert>
+
                 <Button className="w-full gap-2" size="lg" onClick={exportVideo}>
                   <Sparkles className="h-4 w-4" />
                   Generate Video
@@ -443,18 +556,26 @@ export function ExportPanel({ settings, onBack }: ExportPanelProps) {
               </>
             )}
 
-            {(exportStatus === "preparing" || exportStatus === "rendering" || exportStatus === "encoding") && (
+            {(exportStatus === "preparing" ||
+              exportStatus === "rendering" ||
+              exportStatus === "encoding" ||
+              exportStatus === "uploading") && (
               <div className="space-y-4">
                 <Progress value={progress} className="h-3" />
-                <div className="flex items-center justify-center gap-2 text-sm text-muted-foreground">
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  {getStatusText()}
+                <div className="flex items-center justify-between text-sm">
+                  <div className="flex items-center gap-2 text-muted-foreground">
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    {statusMessage}
+                  </div>
+                  {exportStatus === "rendering" && (
+                    <span className="text-muted-foreground">
+                      Frame {currentFrame} / {totalFrames}
+                    </span>
+                  )}
                 </div>
-                {exportStatus === "rendering" && (
-                  <p className="text-xs text-center text-muted-foreground">
-                    This may take a few minutes depending on video length and quality.
-                  </p>
-                )}
+                <Button variant="outline" className="w-full bg-transparent" onClick={cancelExport}>
+                  Cancel
+                </Button>
               </div>
             )}
 
@@ -476,16 +597,36 @@ export function ExportPanel({ settings, onBack }: ExportPanelProps) {
                   </div>
                 </div>
 
+                {videoUrl && (
+                  <div className="aspect-video rounded-lg overflow-hidden bg-black">
+                    <video src={videoUrl} controls className="w-full h-full" />
+                  </div>
+                )}
+
                 <Button className="w-full gap-2" size="lg" onClick={downloadVideo}>
                   <Download className="h-4 w-4" />
-                  Download WebM
+                  Download Video
                 </Button>
 
+                {cloudVideoUrl && (
+                  <Button variant="outline" className="w-full gap-2 bg-transparent" asChild>
+                    <a href={cloudVideoUrl} target="_blank" rel="noopener noreferrer">
+                      <ExternalLink className="h-4 w-4" />
+                      Open Cloud URL
+                    </a>
+                  </Button>
+                )}
+
                 <Button
-                  variant="outline"
-                  className="w-full gap-2 bg-transparent"
-                  onClick={() => setExportStatus("idle")}
+                  variant="ghost"
+                  className="w-full gap-2"
+                  onClick={() => {
+                    setExportStatus("idle")
+                    setVideoBlob(null)
+                    setVideoUrl(null)
+                  }}
                 >
+                  <RefreshCw className="h-4 w-4" />
                   Generate Again
                 </Button>
               </div>
@@ -495,7 +636,7 @@ export function ExportPanel({ settings, onBack }: ExportPanelProps) {
               <div className="space-y-4">
                 <div className="flex items-center justify-center gap-2 text-destructive">
                   <AlertCircle className="h-5 w-5" />
-                  <span>Error generating video. Please try again.</span>
+                  <span>Export failed. Please try again.</span>
                 </div>
                 <Button className="w-full gap-2" onClick={() => setExportStatus("idle")}>
                   Try Again
@@ -515,178 +656,130 @@ export function ExportPanel({ settings, onBack }: ExportPanelProps) {
             <CardDescription>Publish directly to your YouTube channel</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            {youtubeStatus === "disconnected" && (
-              <Button className="w-full gap-2 bg-red-600 hover:bg-red-700 text-white" onClick={connectYouTube}>
-                <Youtube className="h-4 w-4" />
-                Connect YouTube Channel
-              </Button>
-            )}
-
-            {youtubeStatus === "connecting" && (
-              <div className="flex items-center justify-center gap-2 py-4 text-muted-foreground">
-                <Loader2 className="h-4 w-4 animate-spin" />
-                Connecting to YouTube...
+            {youtubeLoading ? (
+              <div className="flex items-center justify-center py-8">
+                <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
               </div>
-            )}
-
-            {(youtubeStatus === "connected" || youtubeStatus === "uploading" || youtubeStatus === "processing") && (
+            ) : !youtubeConnected ? (
+              <div className="space-y-4">
+                <Alert>
+                  <Info className="h-4 w-4" />
+                  <AlertDescription>Connect your YouTube account to upload videos directly.</AlertDescription>
+                </Alert>
+                <Button className="w-full gap-2 bg-red-600 hover:bg-red-700 text-white" onClick={connectYouTube}>
+                  <Youtube className="h-4 w-4" />
+                  Connect YouTube Channel
+                </Button>
+                <p className="text-xs text-muted-foreground text-center">
+                  Requires YOUTUBE_CLIENT_ID and YOUTUBE_CLIENT_SECRET environment variables.
+                </p>
+              </div>
+            ) : (
               <>
-                <div className="flex items-center gap-2 text-sm text-green-500 mb-4">
-                  <CheckCircle2 className="h-4 w-4" />
-                  YouTube connected
+                {/* Connected account info */}
+                <div className="flex items-center gap-3 p-3 rounded-lg bg-secondary/50">
+                  {youtubeUser?.picture && (
+                    <img
+                      src={youtubeUser.picture || "/placeholder.svg"}
+                      alt={youtubeUser.name}
+                      className="w-10 h-10 rounded-full"
+                    />
+                  )}
+                  <div className="flex-1 min-w-0">
+                    <p className="font-medium truncate">{youtubeUser?.channelTitle || youtubeUser?.name}</p>
+                    <p className="text-sm text-muted-foreground truncate">{youtubeUser?.email}</p>
+                  </div>
+                  <Button variant="ghost" size="sm" onClick={disconnectYouTube}>
+                    Disconnect
+                  </Button>
                 </div>
 
-                <Tabs defaultValue="details" className="w-full">
-                  <TabsList className="w-full grid grid-cols-2">
-                    <TabsTrigger value="details">Details</TabsTrigger>
-                    <TabsTrigger value="settings">Settings</TabsTrigger>
-                  </TabsList>
-
-                  <TabsContent value="details" className="space-y-3 mt-4">
-                    <div>
-                      <Label htmlFor="yt-title">Video Title</Label>
-                      <Input
-                        id="yt-title"
-                        value={youtubeTitle}
-                        onChange={(e) => setYoutubeTitle(e.target.value)}
-                        placeholder="Enter video title"
-                        className="mt-1.5"
-                        maxLength={100}
-                      />
-                      <p className="text-xs text-muted-foreground mt-1">{youtubeTitle.length}/100</p>
+                {youtubeVideoUrl ? (
+                  <div className="space-y-4">
+                    <div className="flex items-center justify-center gap-2 text-green-500">
+                      <CheckCircle2 className="h-5 w-5" />
+                      <span className="font-medium">Upload complete!</span>
                     </div>
-
-                    <div>
-                      <Label htmlFor="yt-desc">Description</Label>
-                      <Textarea
-                        id="yt-desc"
-                        value={youtubeDescription}
-                        onChange={(e) => setYoutubeDescription(e.target.value)}
-                        placeholder="Enter video description"
-                        className="mt-1.5 min-h-24"
-                        maxLength={5000}
-                      />
-                      <p className="text-xs text-muted-foreground mt-1">{youtubeDescription.length}/5000</p>
-                    </div>
-
-                    <div>
-                      <Label htmlFor="yt-tags">Tags (comma separated)</Label>
-                      <Input
-                        id="yt-tags"
-                        value={youtubeTags}
-                        onChange={(e) => setYoutubeTags(e.target.value)}
-                        placeholder="music, audio, visualizer"
-                        className="mt-1.5"
-                      />
-                    </div>
-                  </TabsContent>
-
-                  <TabsContent value="settings" className="space-y-3 mt-4">
-                    <div>
-                      <Label>Privacy</Label>
-                      <div className="grid grid-cols-3 gap-2 mt-2">
-                        {(["public", "unlisted", "private"] as const).map((p) => (
-                          <button
-                            key={p}
-                            onClick={() => setYoutubePrivacy(p)}
-                            className={`p-2 rounded-lg border transition-colors text-sm capitalize ${
-                              youtubePrivacy === p
-                                ? "border-primary bg-primary/10"
-                                : "border-border hover:border-primary/50"
-                            }`}
-                          >
-                            {p}
-                          </button>
-                        ))}
+                    <Button className="w-full gap-2" asChild>
+                      <a href={youtubeVideoUrl} target="_blank" rel="noopener noreferrer">
+                        <ExternalLink className="h-4 w-4" />
+                        View on YouTube
+                      </a>
+                    </Button>
+                  </div>
+                ) : (
+                  <>
+                    <div className="space-y-3">
+                      <div>
+                        <Label htmlFor="yt-title">Title</Label>
+                        <Input
+                          id="yt-title"
+                          value={youtubeTitle}
+                          onChange={(e) => setYoutubeTitle(e.target.value)}
+                          placeholder="Video title"
+                        />
+                      </div>
+                      <div>
+                        <Label htmlFor="yt-description">Description</Label>
+                        <Textarea
+                          id="yt-description"
+                          value={youtubeDescription}
+                          onChange={(e) => setYoutubeDescription(e.target.value)}
+                          placeholder="Video description"
+                          rows={3}
+                        />
+                      </div>
+                      <div>
+                        <Label htmlFor="yt-tags">Tags (comma separated)</Label>
+                        <Input
+                          id="yt-tags"
+                          value={youtubeTags}
+                          onChange={(e) => setYoutubeTags(e.target.value)}
+                          placeholder="music, visualization, audio"
+                        />
+                      </div>
+                      <div>
+                        <Label htmlFor="yt-privacy">Privacy</Label>
+                        <Select
+                          value={youtubePrivacy}
+                          onValueChange={(v: typeof youtubePrivacy) => setYoutubePrivacy(v)}
+                        >
+                          <SelectTrigger>
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="public">Public</SelectItem>
+                            <SelectItem value="unlisted">Unlisted</SelectItem>
+                            <SelectItem value="private">Private</SelectItem>
+                          </SelectContent>
+                        </Select>
                       </div>
                     </div>
-                  </TabsContent>
-                </Tabs>
 
-                {youtubeStatus === "uploading" && (
-                  <div className="space-y-2">
-                    <Progress value={progress} className="h-2" />
-                    <p className="text-sm text-center text-muted-foreground">Uploading...</p>
-                  </div>
-                )}
+                    {youtubeUploading && (
+                      <div className="space-y-2">
+                        <Progress value={youtubeUploadProgress} className="h-2" />
+                        <p className="text-sm text-muted-foreground text-center">
+                          Uploading to YouTube... {Math.round(youtubeUploadProgress)}%
+                        </p>
+                      </div>
+                    )}
 
-                {youtubeStatus === "processing" && (
-                  <div className="flex items-center justify-center gap-2 py-2 text-muted-foreground">
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                    YouTube is processing your video...
-                  </div>
-                )}
-
-                {youtubeStatus === "connected" && (
-                  <Button
-                    className="w-full gap-2 bg-red-600 hover:bg-red-700 text-white"
-                    onClick={uploadToYouTube}
-                    disabled={exportStatus !== "complete"}
-                  >
-                    <Youtube className="h-4 w-4" />
-                    Upload to YouTube
-                  </Button>
-                )}
-
-                {exportStatus !== "complete" && youtubeStatus === "connected" && (
-                  <p className="text-xs text-muted-foreground text-center">
-                    Generate your video first before uploading
-                  </p>
+                    <Button
+                      className="w-full gap-2 bg-red-600 hover:bg-red-700 text-white"
+                      onClick={uploadToYouTube}
+                      disabled={!videoBlob || youtubeUploading || exportStatus !== "complete"}
+                    >
+                      {youtubeUploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+                      {!videoBlob ? "Generate video first" : youtubeUploading ? "Uploading..." : "Upload to YouTube"}
+                    </Button>
+                  </>
                 )}
               </>
-            )}
-
-            {youtubeStatus === "complete" && (
-              <div className="space-y-4">
-                <div className="flex items-center justify-center gap-2 text-green-500">
-                  <CheckCircle2 className="h-5 w-5" />
-                  <span className="font-medium">Uploaded successfully!</span>
-                </div>
-                <Button variant="outline" className="w-full gap-2 bg-transparent">
-                  <ExternalLink className="h-4 w-4" />
-                  View on YouTube
-                </Button>
-              </div>
             )}
           </CardContent>
         </Card>
       </div>
-
-      {/* Share Section */}
-      <Card className="mt-6">
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Share2 className="h-5 w-5" />
-            Share Your Creation
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="flex gap-2">
-            <Input value="https://audiovid.pro/share/abc123" readOnly className="flex-1" />
-            <Button variant="secondary" size="icon" onClick={copyShareLink}>
-              <Copy className="h-4 w-4" />
-            </Button>
-          </div>
-          <p className="text-sm text-muted-foreground mt-2">
-            Share this link with others to let them view your video project.
-          </p>
-        </CardContent>
-      </Card>
-
-      {/* Tips */}
-      <Card className="mt-6">
-        <CardContent className="pt-6">
-          <h3 className="font-semibold mb-3">Pro Tips for Better YouTube Performance</h3>
-          <ul className="text-sm text-muted-foreground space-y-2">
-            <li>• Use a descriptive title with relevant keywords for better discoverability</li>
-            <li>• Add timestamps in your description if your audio has multiple sections</li>
-            <li>• Include links to your other social media and streaming platforms</li>
-            <li>• Use relevant tags to help YouTube categorize your content</li>
-            <li>• Upload a custom thumbnail after the video is processed</li>
-            <li>• Consider scheduling your upload for optimal audience engagement times</li>
-          </ul>
-        </CardContent>
-      </Card>
     </div>
   )
 }

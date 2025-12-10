@@ -1,11 +1,14 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
+import { useSearchParams } from "next/navigation"
 import { Header } from "@/components/header"
 import { AudioUploader } from "@/components/audio-uploader"
 import { VideoEditor } from "@/components/video-editor"
 import { VideoPreview } from "@/components/video-preview"
 import { ExportPanel } from "@/components/export-panel"
+import { Alert, AlertDescription } from "@/components/ui/alert"
+import { CheckCircle2, AlertCircle } from "lucide-react"
 
 export type VisualizerStyle =
   | "bars"
@@ -121,6 +124,36 @@ const defaultSettings: ProjectSettings = {
 export default function CreatePage() {
   const [settings, setSettings] = useState<ProjectSettings>(defaultSettings)
   const [step, setStep] = useState<"upload" | "edit" | "export">("upload")
+  const searchParams = useSearchParams()
+
+  const [notification, setNotification] = useState<{ type: "success" | "error"; message: string } | null>(null)
+
+  useEffect(() => {
+    const youtubeConnected = searchParams.get("youtube_connected")
+    const youtubeError = searchParams.get("youtube_error")
+
+    if (youtubeConnected === "true") {
+      setNotification({ type: "success", message: "YouTube account connected successfully!" })
+      // Clear the URL params
+      window.history.replaceState({}, "", "/create")
+    } else if (youtubeError) {
+      const errorMessages: Record<string, string> = {
+        no_code: "YouTube authorization was cancelled.",
+        not_configured: "YouTube API is not configured. Please add credentials.",
+        token_exchange_failed: "Failed to complete YouTube authorization.",
+      }
+      setNotification({
+        type: "error",
+        message: errorMessages[youtubeError] || `YouTube error: ${youtubeError}`,
+      })
+      window.history.replaceState({}, "", "/create")
+    }
+
+    // Auto-dismiss notification after 5 seconds
+    if (youtubeConnected || youtubeError) {
+      setTimeout(() => setNotification(null), 5000)
+    }
+  }, [searchParams])
 
   const updateSettings = (updates: Partial<ProjectSettings>) => {
     setSettings((prev) => ({ ...prev, ...updates }))
@@ -131,6 +164,20 @@ export default function CreatePage() {
       <Header />
 
       <main className="flex-1 container mx-auto px-4 py-8">
+        {notification && (
+          <Alert
+            variant={notification.type === "error" ? "destructive" : "default"}
+            className={`mb-6 ${notification.type === "success" ? "border-green-500 bg-green-500/10" : ""}`}
+          >
+            {notification.type === "success" ? (
+              <CheckCircle2 className="h-4 w-4 text-green-500" />
+            ) : (
+              <AlertCircle className="h-4 w-4" />
+            )}
+            <AlertDescription>{notification.message}</AlertDescription>
+          </Alert>
+        )}
+
         {/* Step indicator */}
         <div className="mb-8">
           <div className="flex items-center justify-center gap-4">
