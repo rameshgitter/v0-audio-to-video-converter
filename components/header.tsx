@@ -1,6 +1,6 @@
 import Link from "next/link"
 import { Button } from "@/components/ui/button"
-import { Zap } from "lucide-react"
+import { Zap, LayoutTemplate, Sparkles } from "lucide-react"
 
 export function Header() {
   return (
@@ -13,15 +13,22 @@ export function Header() {
           <span className="text-xl font-bold tracking-tight">AudioVid Pro</span>
         </Link>
 
-        <nav className="hidden md:flex items-center gap-8">
-          <Link href="#features" className="text-sm text-muted-foreground hover:text-foreground transition-colors">
+        <nav className="hidden md:flex items-center gap-6">
+          <Link href="/#features" className="text-sm text-muted-foreground hover:text-foreground transition-colors">
             Features
           </Link>
-          <Link href="#how-it-works" className="text-sm text-muted-foreground hover:text-foreground transition-colors">
-            How it works
+          <Link
+            href="/templates"
+            className="text-sm text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1"
+          >
+            <LayoutTemplate className="h-3.5 w-3.5" />
+            Templates
           </Link>
-          <Link href="#pricing" className="text-sm text-muted-foreground hover:text-foreground transition-colors">
+          <Link href="/pricing" className="text-sm text-muted-foreground hover:text-foreground transition-colors">
             Pricing
+          </Link>
+          <Link href="/#how-it-works" className="text-sm text-muted-foreground hover:text-foreground transition-colors">
+            How it works
           </Link>
         </nav>
 
@@ -30,7 +37,8 @@ export function Header() {
             Log in
           </Button>
           <Link href="/create">
-            <Button size="sm" className="bg-primary hover:bg-primary/90">
+            <Button size="sm" className="bg-primary hover:bg-primary/90 gap-1.5">
+              <Sparkles className="h-3.5 w-3.5" />
               Start Creating
             </Button>
           </Link>
