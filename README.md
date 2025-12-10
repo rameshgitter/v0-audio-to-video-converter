@@ -1,122 +1,171 @@
-# AudioVid Pro
+<div align="center">
 
-> Transform your audio into stunning videos with real-time visualizers and upload directly to YouTube.
+# 🎵 AudioVid Pro
+
+### Transform your audio into stunning videos with real-time visualizers
 
 [![Deployed on Vercel](https://img.shields.io/badge/Deployed%20on-Vercel-black?style=for-the-badge&logo=vercel)](https://vercel.com/rameshgitters-projects/v0-audio-to-video-converter)
 [![Built with v0](https://img.shields.io/badge/Built%20with-v0-black?style=for-the-badge)](https://v0.app/chat/rOZerIXod47)
 [![Next.js](https://img.shields.io/badge/Next.js-16-black?style=for-the-badge&logo=next.js)](https://nextjs.org)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5-blue?style=for-the-badge&logo=typescript)](https://typescriptlang.org)
 
+**[🚀 Live Demo](https://v0-audio-to-video-converter.vercel.app)** • **[🐛 Report Bug](https://github.com/rameshgitter/v0-audio-to-video-converter/issues)** • **[✨ Request Feature](https://github.com/rameshgitter/v0-audio-to-video-converter/issues)**
+
 ![AudioVid Pro Banner](/public/og-image.png)
 
-## Features
+</div>
 
-### Core Functionality
-- **Audio Upload** - Drag & drop or browse for MP3, WAV, FLAC, OGG files (up to 100MB)
-- **Cloud Storage** - Files stored securely using Vercel Blob
-- **Real-time Preview** - See your video with synchronized audio visualization before export
+---
 
-### Video Customization
-- **4 Visualizer Styles**
-  - Bars - Classic frequency bars
-  - Wave - Smooth waveform display
-  - Circular - Radial frequency visualization
-  - Particles - Dynamic particle system reacting to audio
-- **Background Options**
-  - Gradient presets (Sunset, Ocean, Forest, Nebula, Midnight)
-  - Custom image upload
-  - Custom video upload
-- **Aspect Ratios**
-  - 16:9 (YouTube, Desktop)
-  - 9:16 (TikTok, Reels, Shorts)
-  - 1:1 (Instagram, Square)
+## ✨ Features
 
-### Export Options
-- **Quality**: 720p, 1080p, 1440p, 4K
-- **Frame Rate**: 30 FPS, 60 FPS
-- **Format**: WebM (MP4 with FFmpeg WASM when available)
+### 🎧 Audio Processing
+- **Flexible Upload** — Drag & drop or browse for MP3, WAV, FLAC, OGG files up to 100MB
+- **Cloud Storage** — Secure file storage powered by Vercel Blob
+- **Audio Trimming** — Interactive waveform editor with zoom support
+- **Real-time Preview** — See your video with synchronized audio visualization
 
-### YouTube Integration
-- **OAuth 2.0 Authentication** - Securely connect your YouTube channel
-- **Direct Upload** - Upload videos directly to YouTube from the app
-- **Metadata Support** - Set title, description, tags, and privacy settings
+### 🎨 Visual Customization
 
-### Additional Features
-- **Templates** - Pre-designed templates for different genres (Lo-Fi, Podcast, EDM, etc.)
-- **Keyboard Shortcuts** - Power user controls (Space, arrows, M, etc.)
-- **Recent Projects** - Auto-saved project history
-- **Audio Trimming** - Interactive waveform trimmer with zoom support
+**4 Stunning Visualizer Styles:**
+- **Bars** — Classic frequency bars visualization
+- **Wave** — Smooth waveform display
+- **Circular** — Radial frequency visualization
+- **Particles** — Dynamic particle system reacting to audio
 
-## Tech Stack
+**Flexible Backgrounds:**
+- 5 gradient presets (Sunset, Ocean, Forest, Nebula, Midnight)
+- Custom image upload
+- Custom video upload
 
-- **Framework**: Next.js 16 (App Router)
-- **Language**: TypeScript
-- **Styling**: Tailwind CSS 4, shadcn/ui
-- **Storage**: Vercel Blob
-- **Audio Processing**: Web Audio API
-- **Video Rendering**: Canvas API + MediaRecorder
-- **Authentication**: YouTube OAuth 2.0
+**Multiple Aspect Ratios:**
+- 16:9 — YouTube, Desktop
+- 9:16 — TikTok, Reels, Shorts
+- 1:1 — Instagram, Square posts
 
-## Getting Started
+### 🎬 Export & Upload
+
+**High-Quality Export:**
+- **Quality Options**: 720p • 1080p • 1440p • 4K
+- **Frame Rates**: 30 FPS • 60 FPS
+- **Format**: WebM (MP4 with FFmpeg WASM)
+
+**Direct YouTube Integration:**
+- Secure OAuth 2.0 authentication
+- One-click upload to your channel
+- Full metadata support (title, description, tags, privacy)
+
+### ⚡ Power Features
+- **Templates** — Pre-designed styles for Lo-Fi, Podcast, EDM, and more
+- **Keyboard Shortcuts** — Efficient controls for power users
+- **Recent Projects** — Auto-saved project history
+- **Responsive Design** — Works seamlessly on desktop and mobile
+
+---
+
+## 🛠️ Tech Stack
+
+<table>
+<tr>
+<td>
+
+**Frontend**
+- Next.js 16 (App Router)
+- TypeScript
+- Tailwind CSS 4
+- shadcn/ui
+
+</td>
+<td>
+
+**Backend & APIs**
+- Vercel Blob Storage
+- YouTube Data API v3
+- OAuth 2.0
+
+</td>
+<td>
+
+**Media Processing**
+- Web Audio API
+- Canvas API
+- MediaRecorder API
+- FFmpeg WASM
+
+</td>
+</tr>
+</table>
+
+---
+
+## 🚀 Getting Started
 
 ### Prerequisites
-- Node.js 18+
-- pnpm, npm, or yarn
+
+- Node.js 18 or higher
+- Package manager (pnpm, npm, or yarn)
 
 ### Installation
 
-\`\`\`bash
+```bash
 # Clone the repository
 git clone https://github.com/rameshgitter/v0-audio-to-video-converter.git
 
-# Navigate to the project
+# Navigate to the project directory
 cd v0-audio-to-video-converter
 
 # Install dependencies
 pnpm install
 
-# Start development server
+# Start the development server
 pnpm dev
-\`\`\`
+```
 
-Open [http://localhost:3000](http://localhost:3000) to see the app.
+Open [http://localhost:3000](http://localhost:3000) in your browser to see the app in action.
 
-## Environment Variables
+---
+
+## ⚙️ Configuration
+
+### Environment Variables
 
 Create a `.env.local` file in the root directory:
 
-\`\`\`env
+```env
 # Vercel Blob Storage (Required)
 BLOB_READ_WRITE_TOKEN=your_blob_token_here
 
 # YouTube API (Optional - for YouTube upload feature)
 YOUTUBE_CLIENT_ID=your_google_client_id
 YOUTUBE_CLIENT_SECRET=your_google_client_secret
-\`\`\`
+```
 
 ### Setting Up Vercel Blob
 
 1. Go to your [Vercel Dashboard](https://vercel.com/dashboard)
 2. Select your project
-3. Navigate to **Storage** tab
+3. Navigate to the **Storage** tab
 4. Create a new **Blob** store
-5. Copy the `BLOB_READ_WRITE_TOKEN` to your environment variables
+5. Copy the `BLOB_READ_WRITE_TOKEN` to your `.env.local` file
 
 ### Setting Up YouTube API
 
-1. Go to [Google Cloud Console](https://console.cloud.google.com/)
-2. Create a new project or select existing one
+1. Visit [Google Cloud Console](https://console.cloud.google.com/)
+2. Create a new project or select an existing one
 3. Enable **YouTube Data API v3**
-4. Go to **Credentials** > **Create Credentials** > **OAuth 2.0 Client IDs**
+4. Navigate to **Credentials** → **Create Credentials** → **OAuth 2.0 Client IDs**
 5. Set application type to **Web application**
 6. Add authorized redirect URIs:
-   - `http://localhost:3000/api/auth/youtube/callback` (development)
-   - `https://yourdomain.com/api/auth/youtube/callback` (production)
-7. Copy the **Client ID** and **Client Secret**
+   - Development: `http://localhost:3000/api/auth/youtube/callback`
+   - Production: `https://yourdomain.com/api/auth/youtube/callback`
+7. Copy the **Client ID** and **Client Secret** to your `.env.local` file
 
-## Project Structure
+---
 
-\`\`\`
+## 📁 Project Structure
+
+```
+v0-audio-to-video-converter/
 ├── app/
 │   ├── api/
 │   │   ├── upload/              # Audio upload to Blob
@@ -140,9 +189,11 @@ YOUTUBE_CLIENT_SECRET=your_google_client_secret
 │   ├── ffmpeg-worker.ts         # FFmpeg WASM integration
 │   └── video-renderer.ts        # Video export utilities
 └── ...
-\`\`\`
+```
 
-## API Routes
+---
+
+## 🔌 API Reference
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
@@ -155,7 +206,9 @@ YOUTUBE_CLIENT_SECRET=your_google_client_secret
 | `/api/youtube/upload` | POST | Upload video to YouTube |
 | `/api/youtube/disconnect` | POST | Disconnect YouTube account |
 
-## Keyboard Shortcuts
+---
+
+## ⌨️ Keyboard Shortcuts
 
 | Key | Action |
 |-----|--------|
@@ -168,42 +221,61 @@ YOUTUBE_CLIENT_SECRET=your_google_client_secret
 | `F` | Toggle fullscreen |
 | `?` | Show shortcuts help |
 
-## Deployment
+---
 
-### Deploy with Vercel
+## 🚢 Deployment
+
+### Deploy with Vercel (Recommended)
 
 [![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/rameshgitter/v0-audio-to-video-converter)
 
-1. Click the button above
+1. Click the "Deploy with Vercel" button above
 2. Connect your GitHub repository
-3. Add environment variables in Vercel dashboard
+3. Add your environment variables in the Vercel dashboard
 4. Deploy!
 
 ### Manual Deployment
 
-\`\`\`bash
-# Build the project
+```bash
+# Build the production version
 pnpm build
 
-# Start production server
+# Start the production server
 pnpm start
-\`\`\`
+```
 
-## Contributing
+---
 
-Contributions are welcome! Please feel free to submit a Pull Request.
+## 🤝 Contributing
 
-1. Fork the repository
-2. Create your feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add some amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
+We welcome contributions from the community! Here's how you can help:
 
-## License
+1. **Fork** the repository
+2. **Create** your feature branch
+   ```bash
+   git checkout -b feature/amazing-feature
+   ```
+3. **Commit** your changes
+   ```bash
+   git commit -m 'Add some amazing feature'
+   ```
+4. **Push** to the branch
+   ```bash
+   git push origin feature/amazing-feature
+   ```
+5. **Open** a Pull Request
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+Please make sure to update tests as appropriate and adhere to the existing code style.
 
-## Acknowledgments
+---
+
+## 📄 License
+
+This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
+
+---
+
+## 🙏 Acknowledgments
 
 - Built with [v0.app](https://v0.app) by Vercel
 - UI components from [shadcn/ui](https://ui.shadcn.com)
@@ -211,4 +283,10 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ---
 
-**[Live Demo](https://v0-audio-to-video-converter.vercel.app)** | **[Report Bug](https://github.com/rameshgitter/v0-audio-to-video-converter/issues)** | **[Request Feature](https://github.com/rameshgitter/v0-audio-to-video-converter/issues)**
+<div align="center">
+
+**Made with ❤️ by the AudioVid Pro team**
+
+[⭐ Star this repo](https://github.com/rameshgitter/v0-audio-to-video-converter) if you find it helpful!
+
+</div>
